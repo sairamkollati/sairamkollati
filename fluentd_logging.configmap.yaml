@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: logging
+data:
+  fluent.conf: |-
+    ################################################################
+    # This source gets all logs from local docker host
+    #@include pods-kind-fluent.conf
+    @include pods-fluent.conf
+    #@include file-fluent.conf
+    @include kafka-fluent.conf
+  pods-fluent.conf: |-
+    <source>
+      @type tail
+      read_from_head true
+      tag kubernetes.*
+      path /var/log/containers/falco*.log
+      pos_file /var/log/flaco.log.pos
+      exclude_path ["/var/log/containers/fluent*"]
+      <parse>
+        @type kubernetes
+        @type "#{ENV['FLUENT_CONTAINER_TAIL_PARSER_TYPE'] || 'json'}"
+        time_format %Y-%m-%dT%H:%M:%S.%NZ
+      </parse>
+    </source>
+
+
+    <filter kubernetes.**>
+      @type kubernetes_metadata
+      @id filter_kube_metadata
+      kubernetes_url "#{ENV['FLUENT_FILTER_KUBERNETES_URL'] || 'https://' + ENV.fetch('KUBERNETES_SERVICE_HOST') + ':' + ENV.fetch('KUBERNETES_SERVICE_PORT') + '/api'}"
+      verify_ssl "#{ENV['KUBERNETES_VERIFY_SSL'] || true}"
+      ca_file "#{ENV['KUBERNETES_CA_FILE']}"
+      skip_labels "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_LABELS'] || 'false'}"
+      skip_container_metadata "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_CONTAINER_METADATA'] || 'false'}"
+      skip_master_url "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_MASTER_URL'] || 'false'}"
+      skip_namespace_metadata "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_NAMESPACE_METADATA'] || 'false'}"
+    </filter>
+
+
+    <match **>
+      @type kafka
+      brokers 192.168.2.239:9092
+      default_topic falco.logs
+      output_data_type json
+      output_include_tag true
+      output_include_time true
+      get_kafka_client_log false
+      required_acks 1
+      compression_codec gzip
+      get_kafka_client_log true
+      <format>
+        @type json
+      </format>
+      <inject>
+        tag_key kubernetes.*
+        time_key time
+      </inject>
+    </match>
